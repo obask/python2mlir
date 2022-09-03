@@ -1,40 +1,52 @@
 import ast
+from dataclasses import dataclass, field
 from pprint import pprint
+
+import mlir
+from mlir.printer import DefaultPrinter
+from visitor import PyVisitor
 
 BAD_TOKENS = {'lineno', 'col_offset', 'end_lineno', 'end_col_offset', 'ctx'}
 
 
-def transform(node):
-    if hasattr(node, '__dict__'):
-        tmp = dict((k, transform(v)) for k, v in node.__dict__.items() if k not in BAD_TOKENS)
-        tmp['_t'] = type(node).__name__
-        return tmp
-    elif type(node) is list:
-        return [transform(it) for it in node]
-    else:
-        return node
+@dataclass
+class Visitor:
+    insertion_point: list[mlir.Operator] = field(default_factory=list)
+
+    def visit(self, node):
+        if hasattr(node, '__dict__'):
+            tmp = dict((k, self.visit(v)) for k, v in node.__dict__.items() if k not in BAD_TOKENS)
+            tmp['_t'] = type(node).__name__
+            return tmp
+        elif type(node) is list:
+            return [self.visit(it) for it in node]
+        else:
+            return node
 
 
 CODE = """
 
-def fn():
-    x = 0
-    temp = f1(g1(x))
-    # while temp > 0:
-    #    digit = temp * 10
-    #    sum += digit * 3
-    #    temp //= 10
-    # if 123 == sum:
-    #    print(num,"is an Armstrong number")
-    # else:
-    #    print(num,"is not an Armstrong number")
+def compute_hcf(x, y):
+    if x > y:
+        smaller = y
+    else:
+        smaller = x
+    for i in range(1, smaller+1):
+        if((x % i == 0) and (y % i == 0)):
+            hcf = i 
+    return hcf
+
 """
 
 
 def main():
     tree = ast.parse(CODE)
-    json_x = transform(tree)
-    pprint(json_x, compact=True)
+    # json_x = Visitor().visit(tree)
+    module_op = PyVisitor().visit_Module(tree)
+    pprint(module_op, compact=True)
+
+    sb = DefaultPrinter().render_operator(module_op)
+    print("".join(sb))
 
 
 # Press the green button in the gutter to run the script.
