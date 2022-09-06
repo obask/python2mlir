@@ -1,12 +1,24 @@
 import _ast
 import ast
 from dataclasses import dataclass, field
+from typing import Tuple, List, Dict
 
-from mlir import Operator, Region, BasicBlock, ValueId
+from mlir import Operator, Region, BasicBlock, ValueId, BlockLabel, SimpleType, FunctionTypeAttr
 
 
 def op2return_name(op: Operator):
     return ValueId("%" + str(id(op))[-3:])
+
+
+def parse_type(t) -> SimpleType:
+    if t is None:
+        return SimpleType(f"()")
+    elif isinstance(t, ast.Subscript):
+        return SimpleType(f"!_.{ast.unparse(t)}".replace("[", "<").replace("]", ">"))
+    elif isinstance(t, ast.Name):
+        return SimpleType(f"!_.{t.id}")
+    else:
+        raise NotImplementedError(ast.unparse(t))
 
 
 @dataclass
@@ -14,6 +26,7 @@ class PyVisitor(ast.NodeVisitor):
     parent_blocks: list[list[Operator]] = field(default_factory=list)
     ssa_scopes: list[dict[str, list[Operator]]] = field(default_factory=list)
     var_scopes: list[set[str]] = field(default_factory=list)
+    value_types: Dict[str, SimpleType] = field(default_factory=dict)
 
     #     mod = Module(stmt* body, type_ignore* type_ignores)
     #         | Interactive(stmt* body)
@@ -34,12 +47,15 @@ class PyVisitor(ast.NodeVisitor):
         if not expr:
             return
         if isinstance(expr, ast.Name):
-            op.operands.append(self.visit_Name(expr))
+            value_id = self.visit_Name(expr)
+            op.operands.append(value_id)
+            op.operands_types.append(self.value_types.get(value_id.name, SimpleType("!_.Any")))
         else:
             new_operand = self.visit_expr(expr)
             new_operand.return_name = op2return_name(new_operand)
             self.parent_blocks[-1].append(new_operand)
             op.operands.append(new_operand.return_name)
+            op.operands_types.append(SimpleType("!_.Any"))
 
     @staticmethod
     def add_region(op: Operator, items: list[Operator]):
@@ -49,6 +65,7 @@ class PyVisitor(ast.NodeVisitor):
     def visit_Module(self, node: ast.Module) -> Operator:
         """ Module(stmt* body, type_ignore* type_ignores) """
         op = Operator("module")
+        op.dialect = "builtin"
         # body_ = [self.visit_stmt(stmt) for stmt in node.body]
         # self.add_region(op, body_)
         self.process_region(op, node.body, "body")
@@ -76,11 +93,21 @@ class PyVisitor(ast.NodeVisitor):
         self.ssa_scopes.append(dict())
         self.var_scopes.append(set())
         op = Operator("functionDef")
-        op.attributes['args'] = str(node.args)
-        op.attributes['name'] = str(node.name)
-        op.attributes['returns'] = str(node.returns)
+        # op.attributes['args'] = str(node.args)
+        op.attributes['sym_name'] = str(node.name)
+        # op.attributes['returns'] = str(node.returns)
         op.attributes['type_comment'] = str(node.type_comment)
+        arguments = self.visit_arguments(node.args)
+        function_type = FunctionTypeAttr()
+        for n, t in arguments:
+            self.value_types[n.name] = t
+            function_type.types.append(t)
+        function_type.returns = parse_type(node.returns)
         self.process_region(op, node.body, "body")
+        bb0 = op.regions[0].blocks[0]
+        bb0.label = BlockLabel("^bb0")
+        bb0.label.params = arguments
+        op.attributes['function_type'] = function_type
         # body_ = [self.visit_stmt(stmt) for stmt in node.body]
         # self.add_region(op, body_)
         self.ssa_scopes.pop()
@@ -453,11 +480,19 @@ class PyVisitor(ast.NodeVisitor):
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> Operator:
         raise NotImplementedError(ast.unparse(node))
 
-    def visit_arguments(self, node: ast.arguments) -> Operator:
-        raise NotImplementedError(ast.unparse(node))
+    def visit_arguments(self, node: ast.arguments) -> List[Tuple[ValueId, SimpleType]]:
+        """ arguments(arg* posonlyargs, arg* args, arg? vararg, arg* kwonlyargs, expr* kw_defaults, arg? kwarg, expr* defaults) """
+        assert not node.posonlyargs
+        assert not node.vararg
+        assert not node.kwonlyargs
+        assert not node.kw_defaults
+        assert not node.kwarg
+        assert not node.defaults
+        return [self.visit_arg(a) for a in node.args]
 
-    def visit_arg(self, node: ast.arg) -> Operator:
-        raise NotImplementedError(ast.unparse(node))
+    def visit_arg(self, node: ast.arg) -> Tuple[ValueId, SimpleType]:
+        assert isinstance(node.annotation, ast.Name)
+        return ValueId(f"%{node.arg}"), parse_type(node.annotation)
 
     def visit_keyword(self, node: ast.keyword) -> Operator:
         raise NotImplementedError(ast.unparse(node))

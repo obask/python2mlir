@@ -26,16 +26,15 @@ class Visitor:
 
 CODE = """
 
-def compute_hcf(x, y):
-    if x > y:
-        smaller = y
-    else:
-        smaller = x
-    for i in range(1, smaller+1):
-        if((x % i == 0) and (y % i == 0)):
-            hcf = i 
-    return hcf
-
+def compute_hcf(x: int, y: int) -> List[int]:
+    # if x > y:
+    #     smaller = y
+    # else:
+    #     smaller = x
+    # for i in range(1, smaller+1):
+    #     if((x % i == 0) and (y % i == 0)):
+    #         hcf = i 
+    return x + y
 """
 
 

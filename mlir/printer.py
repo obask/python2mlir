@@ -1,7 +1,8 @@
 import dataclasses
 from dataclasses import dataclass
+from typing import Dict, List
 
-from mlir import Operator, Region, BasicBlock
+from mlir import Operator, Region, BasicBlock, FunctionTypeAttr
 
 
 @dataclass
@@ -11,7 +12,8 @@ class DefaultPrinter:
     def render_block(self, block: BasicBlock, indent: str) -> list[str]:
         new_indent = f"{indent}    "
         if block.label:
-            self.sb.append(new_indent + str(block.label) + "\n")
+            args_string = ", ".join(f"{n.name}: {t.value}" for n, t in block.label.params)
+            self.sb.append(f"{indent}{block.label.name}({args_string}):\n")
         for op in block.items:
             self.render_operator(op, new_indent)
             self.sb.append("\n")
@@ -36,14 +38,29 @@ class DefaultPrinter:
             self.render_region(region, indent)
         self.sb.append(")")
 
+    def render_attributes(self, attributes: Dict, indent: str = "") -> List[str]:
+        items = []
+        for k, attr in attributes.items():
+            if isinstance(attr, FunctionTypeAttr):
+                arg_types = ", ".join(t.value for t in attr.types)
+                items.append(f"{k}=({arg_types}) -> {attr.returns.value}")
+            elif isinstance(attr, str):
+                items.append(f'{k}="{attr}"')
+            else:
+                items.append(f"{k}={attr}")
+        self.sb.append(" {")
+        self.sb.append(", ".join(items))
+        self.sb.append("}")
+        return self.sb
+
     def render_operator(self, op: Operator, indent: str = "") -> list[str]:
         lhs = f"{op.return_name.name} = " if op.return_name else ""
         operands1 = ", ".join([it.name for it in op.operands])
         self.sb.append(f"{indent}{lhs}\"{op.dialect}.{op.name}\"({operands1}) ")
         self.render_regions(op.regions, indent)
         if op.attributes:
-            self.sb.append(str(op.attributes))
-        operand_types = ", ".join("!_.Any" for _ in op.operands)
+            self.render_attributes(op.attributes)
+        operand_types = ", ".join(t.value for t in op.operands_types)
         if op.return_name:
             self.sb.append(f" : ({operand_types}) -> !_.Any")
         else:
