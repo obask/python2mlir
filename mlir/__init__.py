@@ -34,6 +34,7 @@ class Operator:
     name: str
     dialect: str = "py"
     return_name: ValueId = None
+    return_type: SimpleType = None
     operands: List[ValueId] = field(default_factory=list)
     operands_types: List[SimpleType] = field(default_factory=list)
     attributes: Dict[str, any] = field(default_factory=dict)

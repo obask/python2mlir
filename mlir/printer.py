@@ -40,7 +40,7 @@ class DefaultPrinter:
 
     def render_attributes(self, attributes: Dict, indent: str = "") -> List[str]:
         items = []
-        for k, attr in attributes.items():
+        for k, attr in sorted(attributes.items()):
             if isinstance(attr, FunctionTypeAttr):
                 arg_types = ", ".join(t.value for t in attr.types)
                 items.append(f"{k}=({arg_types}) -> {attr.returns.value}")
@@ -62,7 +62,8 @@ class DefaultPrinter:
             self.render_attributes(op.attributes)
         operand_types = ", ".join(t.value for t in op.operands_types)
         if op.return_name:
-            self.sb.append(f" : ({operand_types}) -> !_.Any")
+            return_type = op.return_type.value if op.return_type else "!_.Any"
+            self.sb.append(f" : ({operand_types}) -> {return_type}")
         else:
             self.sb.append(f" : ({operand_types}) -> ()")
         return self.sb

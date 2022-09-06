@@ -5,6 +5,8 @@ from typing import Tuple, List, Dict
 
 from mlir import Operator, Region, BasicBlock, ValueId, BlockLabel, SimpleType, FunctionTypeAttr
 
+RETURN_TYPE_KEY = "RETURN"
+
 
 def op2return_name(op: Operator):
     return ValueId("%" + str(id(op))[-3:])
@@ -27,6 +29,7 @@ class PyVisitor(ast.NodeVisitor):
     ssa_scopes: list[dict[str, list[Operator]]] = field(default_factory=list)
     var_scopes: list[set[str]] = field(default_factory=list)
     value_types: Dict[str, SimpleType] = field(default_factory=dict)
+    is_function_context: bool = False
 
     #     mod = Module(stmt* body, type_ignore* type_ignores)
     #         | Interactive(stmt* body)
@@ -64,8 +67,7 @@ class PyVisitor(ast.NodeVisitor):
 
     def visit_Module(self, node: ast.Module) -> Operator:
         """ Module(stmt* body, type_ignore* type_ignores) """
-        op = Operator("module")
-        op.dialect = "builtin"
+        op = Operator("module", dialect="builtin")
         # body_ = [self.visit_stmt(stmt) for stmt in node.body]
         # self.add_region(op, body_)
         self.process_region(op, node.body, "body")
@@ -92,17 +94,21 @@ class PyVisitor(ast.NodeVisitor):
         """
         self.ssa_scopes.append(dict())
         self.var_scopes.append(set())
-        op = Operator("functionDef")
+        self.is_function_context = True
+        op = Operator("func", dialect="func")
         # op.attributes['args'] = str(node.args)
         op.attributes['sym_name'] = str(node.name)
         # op.attributes['returns'] = str(node.returns)
-        op.attributes['type_comment'] = str(node.type_comment)
+        if node.type_comment:
+            op.attributes['type_comment'] = str(node.type_comment)
         arguments = self.visit_arguments(node.args)
         function_type = FunctionTypeAttr()
         for n, t in arguments:
             self.value_types[n.name] = t
             function_type.types.append(t)
-        function_type.returns = parse_type(node.returns)
+        return_type = parse_type(node.returns)
+        function_type.returns = return_type
+        self.value_types[RETURN_TYPE_KEY] = return_type
         self.process_region(op, node.body, "body")
         bb0 = op.regions[0].blocks[0]
         bb0.label = BlockLabel("^bb0")
@@ -112,6 +118,7 @@ class PyVisitor(ast.NodeVisitor):
         # self.add_region(op, body_)
         self.ssa_scopes.pop()
         self.var_scopes.pop()
+        self.is_function_context = False
         return op
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Operator:
@@ -129,8 +136,9 @@ class PyVisitor(ast.NodeVisitor):
 
     def visit_Return(self, node: ast.Return) -> Operator:
         """ Return(expr? value) """
-        op = Operator("return")
+        op = Operator("return", dialect="func")
         self.process_operand(op, node.value, "value")
+        # op.operands_types[0] = self.value_types[RETURN_TYPE_KEY]
         return op
 
     def visit_Delete(self, node: ast.Delete) -> Operator:
@@ -179,10 +187,18 @@ class PyVisitor(ast.NodeVisitor):
         """ AnnAssign(expr target, expr annotation, expr? value, int simple) """
         if not isinstance(node.target, ast.Name):
             raise NotImplementedError(ast.unparse(node.target))
-        op = Operator("annField")
-        op.attributes['target'] = node.target.id
-        op.attributes['annotation'] = ast.unparse(node.annotation)
-        op.attributes['simple'] = node.simple
+        if self.is_function_context:
+            self.ssa_scopes[-1][node.target.id] = self.parent_blocks[-1]
+            op = Operator("unrealized_conversion_cast", dialect="builtin")
+            op.return_name = ValueId(f"%{node.target.id}")
+            self.process_operand(op, node.value, "value")
+            op.return_type = parse_type(node.annotation)
+            self.value_types[op.return_name.name] = op.return_type
+        else:
+            op = Operator("annField")
+            op.attributes['target'] = node.target.id
+            op.attributes['annotation'] = ast.unparse(node.annotation)
+            op.attributes['simple'] = node.simple
         return op
 
     def visit_For(self, node: ast.For) -> Operator:

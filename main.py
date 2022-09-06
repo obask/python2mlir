@@ -34,7 +34,8 @@ def compute_hcf(x: int, y: int) -> List[int]:
     # for i in range(1, smaller+1):
     #     if((x % i == 0) and (y % i == 0)):
     #         hcf = i 
-    return x + y
+    a: List[int] = x + y
+    return a
 """
 
 
