@@ -4,7 +4,7 @@
 
 ### verifying with MLIR:
 ```sh
-mlir-opt  -mlir-print-op-generic -allow-unregistered-dialect
+hlir-opt  -hlir-print-op-generic -allow-unregistered-dialect
 ```
 
 ### installing mlir on mac

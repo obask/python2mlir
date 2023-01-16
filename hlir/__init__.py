@@ -19,29 +19,23 @@ class BlockLabel:
 
 
 @dataclass
-class BasicBlock:
+class Block:
     items: List['Operator'] = field(default_factory=list)
     label: Optional[BlockLabel] = None
-
-
-@dataclass
-class Region:
-    blocks: List[BasicBlock] = field(default_factory=list)
-
 
 @dataclass
 class Operator:
     name: str
     dialect: str = "py"
-    return_name: ValueId = None
-    return_type: SimpleType = None
-    operands: List[ValueId] = field(default_factory=list)
-    operands_types: List[SimpleType] = field(default_factory=list)
+    return_names: List[ValueId] = field(default_factory=list)
+    return_types: List[SimpleType] = field(default_factory=list)
+    arguments: List[ValueId] = field(default_factory=list)
+    argument_types: List[SimpleType] = field(default_factory=list)
     attributes: Dict[str, any] = field(default_factory=dict)
-    regions: List[Region] = field(default_factory=list)
+    blocks: List[Block] = field(default_factory=list)
 
     def region_from_operators(self, op: list['Operator']):
-        self.regions.append(Region([BasicBlock(op)]))
+        self.blocks.append(Block(op))
 
 
 @dataclass

@@ -3,12 +3,12 @@ import ast
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict
 
-from mlir import Operator, Region, BasicBlock, ValueId, BlockLabel, SimpleType, FunctionTypeAttr
+from hlir import Operator, Block, ValueId, BlockLabel, SimpleType, FunctionTypeAttr
 
 RETURN_TYPE_KEY = "RETURN"
 
 
-def op2return_name(op: Operator):
+def op2return_name(op: Operator) -> ValueId:
     return ValueId("%" + str(id(op))[-3:])
 
 
@@ -51,19 +51,19 @@ class PyVisitor(ast.NodeVisitor):
             return
         if isinstance(expr, ast.Name):
             value_id = self.visit_Name(expr)
-            op.operands.append(value_id)
-            op.operands_types.append(self.value_types.get(value_id.name, SimpleType("!_.Any")))
+            op.arguments.append(value_id)
+            op.argument_types.append(self.value_types.get(value_id.name, SimpleType("!_.Any")))
         else:
             new_operand = self.visit_expr(expr)
-            new_operand.return_name = op2return_name(new_operand)
+            new_operand.return_names.append(op2return_name(new_operand))
             self.parent_blocks[-1].append(new_operand)
-            op.operands.append(new_operand.return_name)
-            op.operands_types.append(SimpleType("!_.Any"))
+            op.arguments += new_operand.return_names
+            op.argument_types.append(SimpleType("!_.Any"))
 
     @staticmethod
     def add_region(op: Operator, items: list[Operator]):
-        blocks = [BasicBlock(items)]
-        op.regions.append(Region(blocks))
+        blocks = [Block(items)]
+        op.blocks.append(Block(blocks))
 
     def visit_Module(self, node: ast.Module) -> Operator:
         """ Module(stmt* body, type_ignore* type_ignores) """
@@ -75,8 +75,8 @@ class PyVisitor(ast.NodeVisitor):
 
     def visit_expr(self, ctx: _ast.expr) -> Operator:
         op = self.visit(ctx)
-        if not op.return_name:
-            op.return_name = op2return_name(op)
+        if not op.return_names:
+            op.return_names.append(op2return_name(op))
         return op
 
     def visit_stmt(self, ctx: _ast.stmt) -> Operator:
@@ -110,7 +110,7 @@ class PyVisitor(ast.NodeVisitor):
         function_type.returns = return_type
         self.value_types[RETURN_TYPE_KEY] = return_type
         self.process_region(op, node.body, "body")
-        bb0 = op.regions[0].blocks[0]
+        bb0 = op.blocks[0]
         bb0.label = BlockLabel("^bb0")
         bb0.label.params = arguments
         op.attributes['function_type'] = function_type
@@ -157,7 +157,7 @@ class PyVisitor(ast.NodeVisitor):
         elif lhs.id in self.ssa_scopes[-1]:
             store = Operator("store")
             store.attributes['name'] = lhs.id
-            store.operands.append(ValueId(f"%{lhs.id}"))
+            store.arguments.append(ValueId(f"%{lhs.id}"))
             self.ssa_scopes[-1][lhs.id].append(store)
             del self.ssa_scopes[-1][lhs.id]
             self.var_scopes[-1].add(lhs.id)
@@ -166,7 +166,7 @@ class PyVisitor(ast.NodeVisitor):
         else:
             self.ssa_scopes[-1][lhs.id] = self.parent_blocks[-1]
             op = Operator("assign")
-            op.return_name = ValueId(f"%{lhs.id}")
+            op.return_names = [ValueId(f"%{lhs.id}")]
         # op.attributes['targets'] = str(node.targets)
         self.process_operand(op, node.value, "value")
         if node.type_comment:
@@ -190,10 +190,12 @@ class PyVisitor(ast.NodeVisitor):
         if self.is_function_context:
             self.ssa_scopes[-1][node.target.id] = self.parent_blocks[-1]
             op = Operator("unrealized_conversion_cast", dialect="builtin")
-            op.return_name = ValueId(f"%{node.target.id}")
+            op.return_names = [ValueId(f"%{node.target.id}")]
             self.process_operand(op, node.value, "value")
-            op.return_type = parse_type(node.annotation)
-            self.value_types[op.return_name.name] = op.return_type
+            op.return_types.append(parse_type(node.annotation))
+            for n, t in zip(op.return_names, op.return_types):
+                self.value_types[n.name] = t
+
         else:
             op = Operator("annField")
             op.attributes['target'] = node.target.id
@@ -382,9 +384,9 @@ class PyVisitor(ast.NodeVisitor):
         if node.id in self.var_scopes[-1]:
             op = Operator("load")
             op.attributes['name'] = node.id
-            op.return_name = ValueId(f"%{node.id}_{str(id(op))[-2:]}")
+            op.return_names.append(ValueId(f"%{node.id}_{str(id(op))[-2:]}"))
             self.parent_blocks[-1].append(op)
-            return op.return_name
+            return op.return_names[-1]
         else:
             return ValueId(f"%{node.id}")
 
@@ -497,7 +499,8 @@ class PyVisitor(ast.NodeVisitor):
         raise NotImplementedError(ast.unparse(node))
 
     def visit_arguments(self, node: ast.arguments) -> List[Tuple[ValueId, SimpleType]]:
-        """ arguments(arg* posonlyargs, arg* args, arg? vararg, arg* kwonlyargs, expr* kw_defaults, arg? kwarg, expr* defaults) """
+        """ arguments(arg* posonlyargs, arg* args, arg? vararg, arg* kwonlyargs,
+                      expr* kw_defaults, arg? kwarg, expr* defaults) """
         assert not node.posonlyargs
         assert not node.vararg
         assert not node.kwonlyargs

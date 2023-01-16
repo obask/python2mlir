@@ -2,8 +2,8 @@ import ast
 from dataclasses import dataclass, field
 from pprint import pprint
 
-import mlir
-from mlir.printer import DefaultPrinter
+import hlir
+from hlir.printer import DefaultPrinter
 from visitor import PyVisitor
 
 BAD_TOKENS = {'lineno', 'col_offset', 'end_lineno', 'end_col_offset', 'ctx'}
@@ -11,7 +11,7 @@ BAD_TOKENS = {'lineno', 'col_offset', 'end_lineno', 'end_col_offset', 'ctx'}
 
 @dataclass
 class Visitor:
-    insertion_point: list[mlir.Operator] = field(default_factory=list)
+    insertion_point: list[hlir.Operator] = field(default_factory=list)
 
     def visit(self, node):
         if hasattr(node, '__dict__'):
